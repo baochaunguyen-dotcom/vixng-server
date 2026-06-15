@@ -22,37 +22,33 @@ app.post('/', async (req, res) => {
             try {
                 const { webhook_url, image_base64, filename } = payload;
                 
-                if (!webhook_url) {
-                    return console.error("[Lỗi]: Không tìm thấy webhook_url từ Google Sheets gửi lên.");
-                }
-                if (!image_base64) {
-                    return console.error("[Lỗi]: Dữ liệu ảnh image_base64 bị trống.");
+                if (!webhook_url || !image_base64) {
+                    return console.error("[Lỗi]: Thiếu webhook_url hoặc dữ liệu ảnh.");
                 }
 
-                // CHUẨN HÓA CHUỖI BASE64: Loại bỏ phần prefix định dạng nếu Google vô tình tự thêm vào
+                // CHUẨN HÓA CHUỖI BASE64: Loại bỏ phần định dạng header nếu có
                 const cleanBase64 = image_base64.replace(/^data:image\/\w+;base64,/, "");
 
-                // Cấu hình payload hình ảnh theo ĐÚNG chuẩn tài liệu Webhook SeaTalk
+                // CẤU TRÚC PAYLOAD CHUẨN ĐỔI THEO ĐÚNG API SEATALK WEBHOOK V2
                 const seatalkPayload = {
-                    "tag": "image",
+                    "message_type": "image",
                     "image": {
                         "base64_image": cleanBase64
                     }
                 };
 
-                console.log(`[Đang gửi]: Đang tiến hành đẩy ảnh file ${filename} sang SeaTalk Webhook...`);
+                console.log(`[Đang gửi]: Đang tiến hành đẩy ảnh file ${filename} sang SeaTalk...`);
 
                 // Gọi API sang SeaTalk
                 const response = await axios.post(webhook_url, seatalkPayload, {
                     headers: { 'Content-Type': 'application/json' }
                 });
                 
-                console.log(`[Thành công] SeaTalk đã nhận ảnh của file: ${filename}. Phản hồi:`, response.data);
+                console.log(`[Kết quả] Phản hồi từ SeaTalk cho file ${filename}:`, response.data);
 
             } catch (bgError) {
                 console.error("[Lỗi từ phía hệ thống SeaTalk]:", bgError.message);
                 if (bgError.response) {
-                    // Xem SeaTalk báo lỗi cụ thể là gì (Ví dụ: sai định dạng payload, invalid webhook...)
                     console.error("[Chi tiết lỗi SeaTalk trả về]:", JSON.stringify(bgError.response.data));
                 }
             }
