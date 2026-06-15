@@ -1,67 +1,80 @@
 const express = require('express');
 const axios = require('axios');
+const pdfImgConvert = require('pdf-img-convert'); // Thư viện chuyển PDF thành ảnh
 const app = express();
 
-// Cấu hình nhận dữ liệu dung lượng lớn (PDF blob/Base64) từ Google Apps Script
 app.use(express.json({ limit: '50mb' })); 
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// Endpoint nhận request POST tại đường dẫn gốc '/'
+app.get('/', (req, res) => {
+    res.send("Server Vixng đang hoạt động!");
+});
+
 app.post('/', async (req, res) => {
     try {
         const payloadFromSheets = req.body;
-        
-        console.log("=== [Yêu cầu mới] Nhận dữ liệu từ Google Sheets ===");
-        console.log("Tên file nhận được:", payloadFromSheets.filename);
+        console.log(`=== [Nhận File] ${payloadFromSheets.filename || 'N/A'} ===`);
 
-        // 1. TRẢ PHẢN HỒI NGAY LẬP TỨC CHO GOOGLE APPS SCRIPT ĐỂ TRÁNH LỖI TIMEOUT
-        res.status(200).send("Server đã nhận file thành công và đang xử lý ngầm...");
+        // Phản hồi ngay lập tức cho Google Sheets để giải phóng tiến trình
+        res.status(200).send("Đã nhận dữ liệu thành công. Server đang xử lý ngầm...");
 
-        // 2. CHẠY NGẦM LOGIC XỬ LÝ (Không bắt Google Apps Script phải đứng đợi)
+        // Xử lý ngầm: Chuyển PDF thành ảnh và gửi sang SeaTalk
         setImmediate(async () => {
             try {
-                const seatalkWebhookUrl = payloadFromSheets.webhook_url || '';
-                
-                if (!seatalkWebhookUrl) {
-                    return console.error("[Lỗi chạy ngầm]: Thiếu URL Webhook của SeaTalk.");
+                const seatalkWebhookUrl = payloadFromSheets.webhook_url;
+                const base64Data = payloadFromSheets.content_base64;
+
+                if (!seatalkWebhookUrl || !base64Data) {
+                    return console.error("[Lỗi ngầm]: Thiếu webhook URL hoặc nội dung file Base64.");
                 }
 
-                // Cấu hình tin nhắn gửi sang SeaTalk 
-                // (Hiện tại đang cấu hình gửi text báo cáo, bạn có thể bổ sung logic convert ảnh tại đây)
-                const responseMessage = {
-                    "tag": "text",
-                    "text": {
-                        "content": `📊 Báo cáo tự động\n- File: ${payloadFromSheets.filename || 'N/A'}\n- Trạng thái: Hệ thống đã tiếp nhận dữ liệu.`
-                    }
-                };
+                console.log("[Xử lý ngầm]: Đang chuyển đổi PDF sang định dạng ảnh...");
+                
+                // 1. Chuyển chuỗi Base64 thành Buffer dữ liệu thô
+                const pdfBuffer = Buffer.from(base64Data, 'base64');
 
-                // Tiến hành POST dữ liệu sang SeaTalk
-                const seatalkRes = await axios.post(seatalkWebhookUrl, responseMessage, {
-                    headers: { 'Content-Type': 'application/json' }
+                // 2. Chuyển đổi PDF thành mảng các ảnh (định dạng ảnh là các Buffer mã hóa)
+                const outputImages = await pdfImgConvert.convert(pdfBuffer, {
+                    width: 1200 // Tăng độ nét cho ảnh bảng tính khi gửi sang SeaTalk
                 });
 
-                console.log(`[Chạy ngầm] Đã chuyển tiếp sang SeaTalk thành công cho file: ${payloadFromSheets.filename}`);
-                console.log("[Phản hồi từ SeaTalk]:", seatalkRes.data);
+                if (!outputImages || outputImages.length === 0) {
+                    return console.error("[Lỗi ngầm]: Chuyển đổi PDF sang ảnh thất bại.");
+                }
+
+                console.log(`[Xử lý ngầm]: Chuyển đổi thành công. Phát hiện ${outputImages.length} trang ảnh. Tiến hành gửi sang SeaTalk...`);
+
+                // 3. Lặp qua từng trang ảnh đã chuyển đổi và gửi sang SeaTalk bằng cấu hình tin nhắn Image
+                for (let i = 0; i < outputImages.length; i++) {
+                    const imgBase64 = outputImages[i].toString('base64');
+
+                    // Cấu hình payload tin nhắn dạng hình ảnh chuẩn của SeaTalk Webhook
+                    const seatalkPayload = {
+                        "tag": "image",
+                        "image": {
+                            "base64_image": imgBase64
+                        }
+                    };
+
+                    // Thực hiện gửi ảnh sang SeaTalk
+                    await axios.post(seatalkWebhookUrl, seatalkPayload, {
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    
+                    console.log(`[Thành công]: Đã gửi trang ảnh thứ ${i + 1} sang SeaTalk.`);
+                }
 
             } catch (bgError) {
-                console.error("[Lỗi xử lý ngầm]:", bgError.message);
-                if (bgError.response) {
-                    console.error("[Chi tiết lỗi từ SeaTalk]:", bgError.response.data);
-                }
+                console.error("[Lỗi hệ thống chạy ngầm]:", bgError.message);
             }
         });
 
     } catch (error) {
-        console.error("Lỗi xảy ra tại đầu nhận của Server:", error.message);
-        // Kiểm tra nếu chưa trả phản hồi cho Google thì mới gửi lỗi về
-        if (!res.headersSent) {
-            return res.status(500).send("Lỗi Server: " + error.message);
-        }
+        console.error("Lỗi đầu nhận:", error.message);
     }
 });
 
-// Chạy server ở cổng mặc định của hệ thống Render hoặc cổng 3000
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`Server đang chạy ổn định tại cổng: ${PORT}`);
+    console.log(`Server chạy tại port: ${PORT}`);
 });
