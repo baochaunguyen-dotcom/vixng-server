@@ -14,7 +14,7 @@ app.post('/', async (req, res) => {
     try {
         const payload = req.body;
         
-        // Phản hồi ngay cho Google Sheets để không lo timeout
+        // Phản hồi ngay cho Google Sheets để giải phóng tiến trình
         res.status(200).send("Đã nhận ảnh. Đang đẩy sang SeaTalk...");
 
         // Xử lý gửi tin nhắn ngầm
@@ -29,11 +29,16 @@ app.post('/', async (req, res) => {
                 // CHUẨN HÓA CHUỖI BASE64: Loại bỏ phần định dạng header nếu có
                 const cleanBase64 = image_base64.replace(/^data:image\/\w+;base64,/, "");
 
-                // CẤU TRÚC PAYLOAD CHUẨN ĐỔI THEO ĐÚNG API SEATALK WEBHOOK V2
+                // CẤU TRÚC PAYLOAD CHUẨN ĐÉT ĐỐI VỚI TIN NHẮN ẢNH CỦA SEATALK ROBOT V2
                 const seatalkPayload = {
-                    "message_type": "image",
-                    "image": {
-                        "base64_image": cleanBase64
+                    "event_type": "message",
+                    "message": {
+                        "message_type": "image",
+                        "content": {
+                            "image": {
+                                "base64_image": cleanBase64
+                            }
+                        }
                     }
                 };
 
